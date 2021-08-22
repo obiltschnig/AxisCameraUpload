@@ -36,7 +36,51 @@
 using namespace std::string_literals;
 
 
-class ImageUploadRequestHandler: public Poco::Net::HTTPRequestHandler
+class BasicRequestHandler: public Poco::Net::HTTPRequestHandler
+{
+public:
+	void ignoreContent(Poco::Net::HTTPServerRequest& request)
+	{
+		Poco::NullOutputStream nullStream;
+		Poco::StreamCopier::copyStream(request.stream(), nullStream);
+	}
+
+	static bool authenticate(const Poco::Net::HTTPServerRequest& request, const std::string& username, const std::string& password)
+	{
+		if (request.hasCredentials())
+		{
+			std::string scheme;
+			std::string authInfo;
+			request.getCredentials(scheme, authInfo);
+			Poco::Net::HTTPBasicCredentials creds(authInfo);
+			return creds.getUsername() == username && creds.getPassword() == password;
+		}
+		else return false;
+	}
+
+	static void sendResponse(Poco::Net::HTTPServerRequest& request, Poco::Net::HTTPResponse::HTTPStatus status, const std::string& message)
+	{
+		request.response().setContentType("text/html"s);
+		request.response().setStatusAndReason(status);
+
+		std::string html("<!DOCTYPE html>\n<html><head><title>");
+		html += Poco::NumberFormatter::format(static_cast<int>(status));
+		html += " - ";
+		html += request.response().getReasonForStatus(status);
+		html += "</title></head><body><header><h1>"s;
+		html += Poco::NumberFormatter::format(static_cast<int>(status));
+		html += " - ";
+		html += request.response().getReasonForStatus(status);
+		html += "</h1></header><section><p>"s;
+		html += Poco::Net::htmlize(message);
+		html += "</p></section>"s;
+		html += "</body></html>"s;
+		request.response().sendBuffer(html.data(), html.size());
+	}
+};
+
+
+class ImageUploadRequestHandler: public BasicRequestHandler
 {
 public:
 	void handleRequest(Poco::Net::HTTPServerRequest& request, Poco::Net::HTTPServerResponse& response)
@@ -44,53 +88,34 @@ public:
 		auto& app = Poco::Util::Application::instance();
 		const auto& config = app.config();
 
-		app.logger().information("Request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
-		if (app.logger().debug())
-		{
-			std::ostringstream sstr;
-			request.write(sstr);
-			app.logger().debug("Request details: %s"s, sstr.str());
-		}
-
 		try
 		{
-			if (authenticate(request, config.getString("upload.username"s), config.getString("upload.password"s)))
+			if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_POST)
 			{
-				if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_POST)
+				if (request.getContentType() == "image/jpeg")
 				{
-					if (request.getContentType() == "image/jpeg")
-					{
-						std::string path = storeImage(request, config.getString("upload.path"s, Poco::Path::current()));
-						app.logger().information("Image stored to '%s'."s, path);
-						return sendResponse(request, Poco::Net::HTTPResponse::HTTP_OK, "Image accepted"s);
-					}
-					else
-					{
-						ignoreContent(request);
-						return sendResponse(request, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "Unexpected content type"s);
-					}
-				}
-				else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_GET)
-				{
-					return sendResponse(request, Poco::Net::HTTPResponse::HTTP_OK, "Image upload server ready"s);
-				}
-				else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_HEAD)
-				{
-					response.send();
-					return;
+					std::string path = storeImage(request, config.getString("upload.path"s, Poco::Path::current()));
+					app.logger().information("Image stored to '%s'."s, path);
+					return sendResponse(request, Poco::Net::HTTPResponse::HTTP_OK, "Image accepted"s);
 				}
 				else
 				{
-					return sendResponse(request, Poco::Net::HTTPResponse::HTTP_METHOD_NOT_ALLOWED, "Request method not allowed"s);
+					ignoreContent(request);
+					return sendResponse(request, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "Unexpected content type"s);
 				}
+			}
+			else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_GET)
+			{
+				return sendResponse(request, Poco::Net::HTTPResponse::HTTP_OK, "Image upload server ready"s);
+			}
+			else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_HEAD)
+			{
+				response.send();
+				return;
 			}
 			else
 			{
-				app.logger().warning("Unauthenticated request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
-				ignoreContent(request);
-				response.requireAuthentication("ImageUpload");
-				response.send();
-				return;
+				return sendResponse(request, Poco::Net::HTTPResponse::HTTP_METHOD_NOT_ALLOWED, "Request method not allowed"s);
 			}
 		}
 		catch (Poco::Exception& exc)
@@ -101,12 +126,6 @@ public:
 				sendResponse(request, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR, "error uploading file");
 			}
 		}
-	}
-
-	void ignoreContent(Poco::Net::HTTPServerRequest& request)
-	{
-		Poco::NullOutputStream nullStream;
-		Poco::StreamCopier::copyStream(request.stream(), nullStream);
 	}
 
 	std::string storeImage(Poco::Net::HTTPServerRequest& request, const std::string& uploadPath)
@@ -160,38 +179,19 @@ public:
 			return "defaultCamera";
 		}
 	}
+};
 
-	bool authenticate(const Poco::Net::HTTPServerRequest& request, const std::string& username, const std::string& password) const
+
+class UnauthorizedRequestHandler: public BasicRequestHandler
+{
+	void handleRequest(Poco::Net::HTTPServerRequest& request, Poco::Net::HTTPServerResponse& response)
 	{
-		if (request.hasCredentials())
-		{
-			std::string scheme;
-			std::string authInfo;
-			request.getCredentials(scheme, authInfo);
-			Poco::Net::HTTPBasicCredentials creds(authInfo);
-			return creds.getUsername() == username && creds.getPassword() == password;
-		}
-		else return false;
-	}
+		auto& app = Poco::Util::Application::instance();
 
-	void sendResponse(Poco::Net::HTTPServerRequest& request, Poco::Net::HTTPResponse::HTTPStatus status, const std::string& message) const
-	{
-		request.response().setContentType("text/html"s);
-		request.response().setStatusAndReason(status);
-
-		std::string html("<!DOCTYPE html>\n<html><head><title>");
-		html += Poco::NumberFormatter::format(static_cast<int>(status));
-		html += " - ";
-		html += request.response().getReasonForStatus(status);
-		html += "</title></head><body><header><h1>"s;
-		html += Poco::NumberFormatter::format(static_cast<int>(status));
-		html += " - ";
-		html += request.response().getReasonForStatus(status);
-		html += "</h1></header><section><p>"s;
-		html += Poco::Net::htmlize(message);
-		html += "</p></section>"s;
-		html += "</body></html>"s;
-		request.response().sendBuffer(html.data(), html.size());
+		app.logger().warning("Unauthenticated request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
+		ignoreContent(request);
+		response.requireAuthentication("ImageUpload");
+		response.send();
 	}
 };
 
@@ -201,7 +201,26 @@ class ImageUploadRequestHandlerFactory: public Poco::Net::HTTPRequestHandlerFact
 public:
 	Poco::Net::HTTPRequestHandler* createRequestHandler(const Poco::Net::HTTPServerRequest& request)
 	{
-		return new ImageUploadRequestHandler;
+		auto& app = Poco::Util::Application::instance();
+		const auto& config = app.config();
+
+		app.logger().information("Request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
+		if (app.logger().debug())
+		{
+			std::ostringstream sstr;
+			request.write(sstr);
+			app.logger().debug("Request details: %s"s, sstr.str());
+		}
+
+		if (BasicRequestHandler::authenticate(request, config.getString("upload.username"s), config.getString("upload.password"s)))
+		{
+			return new ImageUploadRequestHandler;
+		}
+		else
+		{
+			request.response().setStatusAndReason(Poco::Net::HTTPResponse::HTTP_UNAUTHORIZED);
+			return new UnauthorizedRequestHandler;
+		}
 	}
 };
 
