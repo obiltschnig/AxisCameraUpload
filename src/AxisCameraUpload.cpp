@@ -29,6 +29,7 @@
 #include "Poco/FileStream.h"
 #include "Poco/Path.h"
 #include "Poco/File.h"
+#include <sstream>
 #include <iostream>
 
 
@@ -44,6 +45,12 @@ public:
 		const auto& config = app.config();
 
 		app.logger().information("Request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
+		if (app.logger().debug())
+		{
+			std::ostringstream sstr;
+			request.write(sstr);
+			app.logger().debug("Request details: %s"s, sstr.str());
+		}
 
 		try
 		{
