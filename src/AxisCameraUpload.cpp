@@ -54,9 +54,9 @@ public:
 
 		try
 		{
-			if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_POST)
+			if (authenticate(request, config.getString("upload.username"s), config.getString("upload.password"s)))
 			{
-				if (authenticate(request, config.getString("upload.username"s), config.getString("upload.password"s)))
+				if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_POST)
 				{
 					if (request.getContentType() == "image/jpeg")
 					{
@@ -70,22 +70,27 @@ public:
 						return sendResponse(request, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "Unexpected content type"s);
 					}
 				}
-				else
+				else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_GET)
 				{
-					app.logger().warning("Unauthenticated request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
-					ignoreContent(request);
-					response.requireAuthentication("ImageUpload");
+					return sendResponse(request, Poco::Net::HTTPResponse::HTTP_OK, "Image upload server ready"s);
+				}
+				else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_HEAD)
+				{
 					response.send();
 					return;
 				}
-			}
-			else if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_GET)
-			{
-				return sendResponse(request, Poco::Net::HTTPResponse::HTTP_OK, "Image upload server ready"s);
+				else
+				{
+					return sendResponse(request, Poco::Net::HTTPResponse::HTTP_METHOD_NOT_ALLOWED, "Request method not allowed"s);
+				}
 			}
 			else
 			{
-				return sendResponse(request, Poco::Net::HTTPResponse::HTTP_METHOD_NOT_ALLOWED, "Request method not allowed"s);
+				app.logger().warning("Unauthenticated request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
+				ignoreContent(request);
+				response.requireAuthentication("ImageUpload");
+				response.send();
+				return;
 			}
 		}
 		catch (Poco::Exception& exc)
