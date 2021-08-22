@@ -190,7 +190,6 @@ public:
 	Poco::Net::HTTPRequestHandler* createRequestHandler(const Poco::Net::HTTPServerRequest& request)
 	{
 		auto& app = Poco::Util::Application::instance();
-		const auto& config = app.config();
 
 		app.logger().information("Request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
 		if (app.logger().debug())
