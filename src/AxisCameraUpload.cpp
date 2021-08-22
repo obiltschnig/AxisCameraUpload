@@ -65,6 +65,7 @@ public:
 				}
 				else
 				{
+					app.logger().warning("Unauthenticated request from %s: %s %s"s, request.clientAddress().toString(), request.getMethod(), request.getURI());
 					ignoreContent(request);
 					response.requireAuthentication("ImageUpload");
 					response.send();
