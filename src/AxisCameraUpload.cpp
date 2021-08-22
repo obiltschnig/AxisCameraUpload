@@ -144,7 +144,8 @@ public:
 
 	std::string uploadCamera(const Poco::Net::HTTPServerRequest& request) const
 	{
-		Poco::Path p(request.getURI(), Poco::Path::PATH_UNIX);
+		Poco::URI uri(request.getURI());
+		Poco::Path p(uri.getPath(), Poco::Path::PATH_UNIX);
 		p.makeDirectory();
 		if (p.depth() >= 3)
 		{
